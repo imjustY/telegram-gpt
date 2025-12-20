@@ -1,6 +1,6 @@
 import logging
 import tempfile
-import ffmpeg
+#import ffmpeg
 import json
 import os
 from telegram import Update, ReplyKeyboardMarkup
@@ -226,34 +226,34 @@ def finalize_step(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # --- Голосовые сообщения ---
-async def voice_to_text(update: Update, context: CallbackContext):
-    voice_file = await update.message.voice.get_file()
-    with tempfile.NamedTemporaryFile(suffix=".ogg") as f:
-        await voice_file.download_to_drive(f.name)
-        wav_file = f.name.replace(".ogg", ".wav")
-        ffmpeg.input(f.name).output(wav_file).run(overwrite_output=True)
-        with open(wav_file, "rb") as audio:
-            transcript = openai.Audio.transcriptions.create(
-                model="whisper-1",
-                file=audio
-            )
-    update.message.text = transcript['text']
-    current_state = context.user_data.get('current_state', TYPE_PROJECT)
-    state_map = {
-        TYPE_PROJECT: type_project,
-        MOOD: mood_step,
-        ACTION: action_step,
-        NAME: type_step,
-        TYPE: type_step,
-        SKILLS: skills_step,
-        STATE: state_step,
-        HIDDEN_Q: hidden_question_step,
-        LENGTH: length_step,
-        TONE: tone_step,
-        CTA: cta_step,
-        GENERATE: generate_step
-    }
-    return state_map.get(current_state, type_project)(update, context)
+#async def voice_to_text(update: Update, context: CallbackContext):
+    #voice_file = await update.message.voice.get_file()
+    #with tempfile.NamedTemporaryFile(suffix=".ogg") as f:
+        #await voice_file.download_to_drive(f.name)
+        #wav_file = f.name.replace(".ogg", ".wav")
+        #ffmpeg.input(f.name).output(wav_file).run(overwrite_output=True)
+        #with open(wav_file, "rb") as audio:
+            #transcript = openai.Audio.transcriptions.create(
+                #model="whisper-1",
+                #file=audio
+            #)
+    #update.message.text = transcript['text']
+    #current_state = context.user_data.get('current_state', TYPE_PROJECT)
+    #state_map = {
+        #TYPE_PROJECT: type_project,
+        #MOOD: mood_step,
+        #ACTION: action_step,
+        #NAME: type_step,
+        #TYPE: type_step,
+        #SKILLS: skills_step,
+        #STATE: state_step,
+        #HIDDEN_Q: hidden_question_step,
+        #LENGTH: length_step,
+        #TONE: tone_step,
+        #CTA: cta_step,
+        #GENERATE: generate_step
+    #}
+    #return state_map.get(current_state, type_project)(update, context)
 
 # --- Просмотр визиток ---
 def mycards(update: Update, context: CallbackContext):
