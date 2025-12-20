@@ -1,7 +1,7 @@
 import logging
 import json
 import os
-import requests
+
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,7 +12,9 @@ from telegram.ext import (
     filters
 )
 
-# ------------------ НАСТРОЙКИ ------------------
+from openai import OpenAI
+
+# ---------------- НАСТРОЙКИ ----------------
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,262 +22,221 @@ logging.basicConfig(
 )
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-AMVERA_API_KEY = os.getenv("OPENAI_API_KEY")  # длинный токен Amvera
-AMVERA_MODEL = "gpt-5"
-AMVERA_URL = "https://api.amvera.com/v1/chat/completions"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-DATA_DIR = "user_data"
-os.makedirs(DATA_DIR, exist_ok=True)
+if not TELEGRAM_TOKEN:
+    raise RuntimeError("TELEGRAM_TOKEN не задан")
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY не задан")
 
-# ------------------ СОСТОЯНИЯ ------------------
+client = OpenAI(api_key=OPENAI_API_KEY)
+MODEL = "gpt-4o-mini"
+
+# ---------------- СОСТОЯНИЯ ----------------
 
 (
-    TYPE_PROJECT,
-    MOOD,
-    ACTION,
+    PROJECT,
+    TASK,
     NAME,
-    SCHOOL,
-    TYPECAST,
-    SKILLS,
-    STATE,
-    HIDDEN_Q,
-    LENGTH,
-    TONE,
-    CTA,
+    EDUCATION,
+    ACTION,
+    PRESENCE,
+    BEHAVIOR,
+    UNIVERSAL,
     GENERATE
-) = range(13)
+) = range(9)
 
-# ------------------ УТИЛИТЫ ------------------
-
-def user_file(user_id: str) -> str:
-    return os.path.join(DATA_DIR, f"{user_id}.json")
-
-def save_user(user_id: str, data: dict):
-    with open(user_file(user_id), "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def load_user(user_id: str) -> dict:
-    if os.path.exists(user_file(user_id)):
-        with open(user_file(user_id), "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def amvera_chat(messages: list[str]) -> str:
-    headers = {
-        "Authorization": f"Bearer {AMVERA_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": AMVERA_MODEL,
-        "messages": messages,
-        "temperature": 0.7
-    }
-
-    r = requests.post(
-        AMVERA_URL,
-        headers=headers,
-        json=payload,
-        timeout=60
-    )
-
-    if r.status_code != 200:
-        logging.error(f"Amvera error {r.status_code}: {r.text}")
-        raise RuntimeError("Ошибка запроса к LLM")
-
-    data = r.json()
-
-    return data["choices"][0]["message"]["content"]
-
-# ------------------ ДИАЛОГ ------------------
+# ---------------- СТАРТ ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-
-    save_user(user_id, {
-        "project": {},
-        "actor": {},
-        "focus": {}
-    })
+    context.user_data.clear()
 
     await update.message.reply_text(
-        "Привет. Я помогу собрать актёрскую видеовизитку под логику кастинга 2026 года.\n\nВыберите действие:",
+        "Этот бот помогает собрать текст видеовизитки для кастинга.\n"
+        "Не резюме. Не рассказ о себе.\n"
+        "А короткое впечатление человека, которого хочется смотреть дальше.\n\n"
+        "Займёт 5–7 минут.",
         reply_markup=ReplyKeyboardMarkup(
-            [["Собрать визитку"]],
-            one_time_keyboard=True,
-            resize_keyboard=True
+            [["Начать"]],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
     )
-    return TYPE_PROJECT
+    return PROJECT
 
-async def type_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------------- БЛОК 1. ПРОЕКТ ----------------
+
+async def project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Тип проекта:",
+        "Для какого проекта вы делаете визитку?",
         reply_markup=ReplyKeyboardMarkup(
-            [["современная драма", "комедия"],
-             ["историческая", "триллер"]],
-            one_time_keyboard=True,
-            resize_keyboard=True
+            [
+                ["Современная драма", "Комедия"],
+                ["Реклама", "Подростковый проект"],
+                ["Исторический", "Триллер / мистика"]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
     )
-    return MOOD
+    return TASK
 
-async def mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["project"]["type"] = update.message.text
-    save_user(str(update.effective_user.id), user)
+async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["project"] = update.message.text
 
     await update.message.reply_text(
-        "Настроение визитки:",
+        "Какую задачу должна решать эта визитка?",
         reply_markup=ReplyKeyboardMarkup(
-            [["спокойное", "сдержанно-уверенное", "лёгкое"]],
-            one_time_keyboard=True,
-            resize_keyboard=True
-        )
-    )
-    return ACTION
-
-async def action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["project"]["mood"] = update.message.text
-    save_user(str(update.effective_user.id), user)
-
-    await update.message.reply_text(
-        "Действие в кадре:",
-        reply_markup=ReplyKeyboardMarkup(
-            [["установить контакт", "удерживать внимание", "мягко вовлекать"]],
-            one_time_keyboard=True,
-            resize_keyboard=True
+            [
+                ["Познакомить кастинг со мной"],
+                ["Закрепить конкретный типаж"],
+                ["Обновить материалы под кастинги"],
+                ["Подготовить визитку под самопробы"]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
     )
     return NAME
 
+# ---------------- БЛОК 2. ФАКТЫ ----------------
+
 async def name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["project"]["action"] = update.message.text
-    save_user(str(update.effective_user.id), user)
+    context.user_data["task"] = update.message.text
+    await update.message.reply_text("Как вас зовут?")
+    return EDUCATION
 
-    await update.message.reply_text("Ваше имя:")
-    return SCHOOL
-
-async def school(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["actor"]["name"] = update.message.text
-    save_user(str(update.effective_user.id), user)
-
-    await update.message.reply_text("Вуз:")
-    return TYPECAST
-
-async def typecast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["actor"]["school"] = update.message.text
-    save_user(str(update.effective_user.id), user)
-
-    await update.message.reply_text("Один ключевой типаж:")
-    return SKILLS
-
-async def skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["actor"]["type"] = update.message.text
-    save_user(str(update.effective_user.id), user)
-
-    await update.message.reply_text("Релевантные навыки (через запятую):")
-    return STATE
-
-async def state(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["actor"]["skills"] = [s.strip() for s in update.message.text.split(",")]
-    save_user(str(update.effective_user.id), user)
-
-    await update.message.reply_text("Какое состояние создаёте в кадре?")
-    return HIDDEN_Q
-
-async def hidden_q(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["focus"]["state"] = update.message.text
-    save_user(str(update.effective_user.id), user)
-
-    await update.message.reply_text("На какой скрытый вопрос кастинг-директора вы отвечаете?")
-    return LENGTH
-
-async def length(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["focus"]["hidden_question"] = update.message.text
-    save_user(str(update.effective_user.id), user)
+async def education(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["name"] = update.message.text
 
     await update.message.reply_text(
-        "Длительность:",
+        "Образование (если есть). Можно коротко.",
         reply_markup=ReplyKeyboardMarkup(
-            [["30 секунд", "45 секунд"]],
-            one_time_keyboard=True,
-            resize_keyboard=True
+            [["Пропустить"]],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
     )
-    return TONE
+    return ACTION
 
-async def tone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["length"] = update.message.text
-    save_user(str(update.effective_user.id), user)
+# ---------------- БЛОК 3. ПОВЕДЕНИЕ ----------------
+
+async def action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text != "Пропустить":
+        context.user_data["education"] = update.message.text
 
     await update.message.reply_text(
-        "Тон визитки:",
+        "В этой визитке вы в кадре в первую очередь:",
         reply_markup=ReplyKeyboardMarkup(
-            [["дружелюбный", "строгий", "лёгкая ирония"]],
-            one_time_keyboard=True,
-            resize_keyboard=True
+            [
+                ["Очаровываю"],
+                ["Удерживаю внимание"],
+                ["Вовлекаю в диалог"]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
     )
-    return CTA
+    return PRESENCE
 
-async def cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["tone"] = update.message.text
-    save_user(str(update.effective_user.id), user)
+async def presence(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["action"] = update.message.text
 
     await update.message.reply_text(
-        "Финальный CTA:",
+        "Как вы присутствуете в кадре?",
         reply_markup=ReplyKeyboardMarkup(
-            [["Готов к пробам", "Буду рад встрече", "Открыт к диалогу"]],
-            one_time_keyboard=True,
-            resize_keyboard=True
+            [
+                ["Спокойный центр"],
+                ["Живой собеседник"],
+                ["Загадка"]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+    )
+    return BEHAVIOR
+
+async def behavior(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["presence"] = update.message.text
+
+    await update.message.reply_text(
+        "В кадре вы ведёте себя как человек, который:",
+        reply_markup=ReplyKeyboardMarkup(
+            [
+                ["Не торопится и даёт себя рассмотреть"],
+                ["Спокойно удерживает контакт"],
+                ["Мягко притягивает внимание"],
+                ["Смотрит прямо и не объясняется"],
+                ["Чуть недоговаривает"]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+    )
+    return UNIVERSAL
+
+# ---------------- БЛОК 4. УНИВЕРСАЛЬНОСТЬ ----------------
+
+async def universal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["behavior"] = update.message.text
+
+    await update.message.reply_text(
+        "Вы хотите визитку строго под этот проект или более универсальную?",
+        reply_markup=ReplyKeyboardMarkup(
+            [
+                ["Строго под этот проект"],
+                ["Более универсальную"]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
     )
     return GENERATE
 
+# ---------------- ГЕНЕРАЦИЯ ----------------
+
 async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = load_user(str(update.effective_user.id))
-    user["cta"] = update.message.text
+    context.user_data["universal"] = update.message.text
+
+    await update.message.reply_text("Собираю две версии текста…")
 
     system_prompt = f"""
-Ты — эксперт по актёрским видеовизиткам 2026 года.
-Создай 2–3 короткие версии текста видеовизитки.
+Ты — профессиональный редактор актёрских видеовизиток 2026 года.
+
+Создай ДВЕ версии текста видеовизитки под проект: {context.user_data['project']}.
+
+Данные:
+Имя: {context.user_data.get('name')}
+Образование: {context.user_data.get('education', 'не указано')}
+Действие: {context.user_data['action']}
+Тип присутствия: {context.user_data['presence']}
+Поведение: {context.user_data['behavior']}
 
 Правила:
-- Один типаж, одно настроение.
-- Не резюме, не биография.
-- Минимум слов, максимум присутствия.
-- Длина: {user['length']}
-- Тон: {user['tone']}
-- Скрытый вопрос: {user['focus']['hidden_question']}
-- Финальный CTA: {user['cta']}
+- не резюме
+- не объяснение
+- одно впечатление
+- читаемость без звука
+- недосказанность
+
+После текстов:
+1. кратко опиши впечатление,
+2. дай 1–2 рекомендации по записи.
 """
 
-    messages = [{"role": "system", "content": system_prompt}]
-
-    try:
-        result = amvera_chat(messages)
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка генерации: {e}")
-        return ConversationHandler.END
-
-    await update.message.reply_text(
-        "Готово. Варианты визитки:\n\n" + result
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "system", "content": system_prompt}],
+        temperature=0.7
     )
+
+    result = response.choices[0].message.content
+
+    await update.message.reply_text(result)
 
     return ConversationHandler.END
 
-# ------------------ MAIN ------------------
+# ---------------- MAIN ----------------
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -283,18 +244,14 @@ def main():
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            TYPE_PROJECT: [MessageHandler(filters.TEXT, type_project)],
-            MOOD: [MessageHandler(filters.TEXT, mood)],
-            ACTION: [MessageHandler(filters.TEXT, action)],
+            PROJECT: [MessageHandler(filters.TEXT, project)],
+            TASK: [MessageHandler(filters.TEXT, task)],
             NAME: [MessageHandler(filters.TEXT, name)],
-            SCHOOL: [MessageHandler(filters.TEXT, school)],
-            TYPECAST: [MessageHandler(filters.TEXT, typecast)],
-            SKILLS: [MessageHandler(filters.TEXT, skills)],
-            STATE: [MessageHandler(filters.TEXT, state)],
-            HIDDEN_Q: [MessageHandler(filters.TEXT, hidden_q)],
-            LENGTH: [MessageHandler(filters.TEXT, length)],
-            TONE: [MessageHandler(filters.TEXT, tone)],
-            CTA: [MessageHandler(filters.TEXT, cta)],
+            EDUCATION: [MessageHandler(filters.TEXT, education)],
+            ACTION: [MessageHandler(filters.TEXT, action)],
+            PRESENCE: [MessageHandler(filters.TEXT, presence)],
+            BEHAVIOR: [MessageHandler(filters.TEXT, behavior)],
+            UNIVERSAL: [MessageHandler(filters.TEXT, universal)],
             GENERATE: [MessageHandler(filters.TEXT, generate)],
         },
         fallbacks=[]
