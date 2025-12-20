@@ -13,270 +13,287 @@ from telegram.ext import (
     filters,
 )
 
-# ---------------- НАСТРОЙКИ ----------------
+# ---------- НАСТРОЙКИ ----------
 
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-USE_AMVERA = os.environ.get("USE_AMVERA", "False") == "True"
-AMVERA_API_KEY = os.environ.get("AMVERA_API_KEY") or OPENAI_API_KEY
+AMVERA_API_KEY = os.environ.get("AMVERA_API_KEY")
 AMVERA_MODEL = os.environ.get("AMVERA_MODEL", "gpt-5")
 
 DATA_DIR = "user_data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ---------------- СОСТОЯНИЯ ----------------
+# ---------- СОСТОЯНИЯ ----------
 
 (
     TYPE_PROJECT,
     MOOD,
     ACTION,
     NAME,
+    SCHOOL,
     TYPE,
     SKILLS,
     STATE,
-    HIDDEN_Q,
     LENGTH,
     TONE,
     CTA,
     GENERATE,
 ) = range(12)
 
-# ---------------- ХРАНЕНИЕ ----------------
+# ---------- CTA ПУЛЫ ----------
 
-def save_user_json(user_id: str, data: dict):
-    path = os.path.join(DATA_DIR, f"{user_id}.json")
-    with open(path, "w", encoding="utf-8") as f:
+CTA_POOLS = {
+    "современная драма": [
+        "Открыт(а) к самопробам",
+        "Буду рад(а) продолжить диалог по проекту",
+        "Готов(а) к следующему этапу",
+    ],
+    "комедия": [
+        "Открыт(а) к самопробам",
+        "Готов(а) продолжить диалог",
+        "Буду рад(а) следующему шагу",
+    ],
+    "реклама": [
+        "Открыт(а) к кастингу",
+        "Готов(а) к дальнейшему этапу",
+        "Буду рад(а) сотрудничеству",
+    ],
+    "подростковый": [
+        "Открыт(а) к кастингу",
+        "Готов(а) к самопробам",
+        "Буду рад(а) продолжить",
+    ],
+    "историческая": [
+        "Открыт(а) к продолжению отбора",
+        "Готов(а) к следующему этапу",
+        "Буду рад(а) диалогу по проекту",
+    ],
+    "триллер": [
+        "Открыт(а) к самопробам",
+        "Готов(а) продолжить диалог",
+        "Буду рад(а) следующему этапу",
+    ],
+}
+
+# ---------- УТИЛИТЫ ----------
+
+def save_user(user_id, data):
+    with open(f"{DATA_DIR}/{user_id}.json", "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def load_user_json(user_id: str):
-    path = os.path.join(DATA_DIR, f"{user_id}.json")
+def load_user(user_id):
+    path = f"{DATA_DIR}/{user_id}.json"
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     return None
 
-# ---------------- LLM ----------------
-
 def amvera_chat(messages):
-    url = "https://api.amvera.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {AMVERA_API_KEY}"}
-    data = {"model": AMVERA_MODEL, "messages": messages}
-    r = requests.post(url, json=data, headers=headers, timeout=60)
+    r = requests.post(
+        "https://api.amvera.com/v1/chat/completions",
+        headers={"Authorization": f"Bearer {AMVERA_API_KEY}"},
+        json={"model": AMVERA_MODEL, "messages": messages},
+        timeout=60,
+    )
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
 
-def gpt_chat(messages):
-    return amvera_chat(messages)
-
-# ---------------- ДИАЛОГ ----------------
+# ---------- ДИАЛОГ ----------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет. Я помогу собрать актёрскую видеовизитку под конкретный проект.\n"
+        "Я помогу собрать актёрскую видеовизитку под конкретный проект.\n"
         "Это не резюме, а впечатление.\n\nНачнём.",
         reply_markup=ReplyKeyboardMarkup(
-            [["Собрать визитку"]], one_time_keyboard=True
+            [["Собрать визитку"]], resize_keyboard=True, one_time_keyboard=True
         ),
     )
     return TYPE_PROJECT
 
 async def type_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
-
-    user_json = {
-        "user_id": user_id,
-        "project": {},
-        "actor": {},
-        "focus": {},
-        "length": "",
-        "tone": "",
-        "cta": "",
-        "drafts": [],
-        "final": None,
-    }
-    save_user_json(user_id, user_json)
+    save_user(user_id, {"project": {}, "actor": {}, "focus": {}})
 
     await update.message.reply_text(
         "Выберите тип проекта:",
         reply_markup=ReplyKeyboardMarkup(
-            [
-                ["современная драма", "лёгкая драма", "комедия"],
-                ["подростковый", "реклама", "историческая", "триллер"],
-            ],
+            [["современная драма", "комедия", "реклама"],
+             ["подростковый", "историческая", "триллер"]],
+            resize_keyboard=True,
             one_time_keyboard=True,
         ),
     )
     return MOOD
 
 async def mood_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["project"]["type"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
+    u = load_user(str(update.message.from_user.id))
+    u["project"]["type"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
 
     await update.message.reply_text(
         "Выберите настроение:",
         reply_markup=ReplyKeyboardMarkup(
             [["спокойное", "лёгкое", "сдержанно-уверенное"]],
+            resize_keyboard=True,
             one_time_keyboard=True,
         ),
     )
     return ACTION
 
 async def action_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["project"]["mood"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
+    u = load_user(str(update.message.from_user.id))
+    u["project"]["mood"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
 
     await update.message.reply_text(
-        "Выберите действие в кадре:",
+        "Выберите действие:",
         reply_markup=ReplyKeyboardMarkup(
-            [["установить контакт", "удерживать внимание", "мягко вовлекать"]],
+            [["очаровывать", "удерживать внимание", "вовлекать"]],
+            resize_keyboard=True,
             one_time_keyboard=True,
         ),
     )
     return NAME
 
 async def name_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["project"]["action"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
+    u = load_user(str(update.message.from_user.id))
+    u["project"]["action"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
 
-    await update.message.reply_text("Введите ваше имя:")
+    await update.message.reply_text("Ваше имя:")
+    return SCHOOL
+
+async def school_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = load_user(str(update.message.from_user.id))
+    u["actor"]["name"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
+
+    await update.message.reply_text("Вуз (или «пропустить»):")
     return TYPE
 
 async def type_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["actor"]["name"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
+    u = load_user(str(update.message.from_user.id))
+    if update.message.text.lower() != "пропустить":
+        u["actor"]["school"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
 
-    await update.message.reply_text("Введите ваш вуз (или напишите «пропустить»):")
+    await update.message.reply_text("Типаж (один):")
     return SKILLS
 
 async def skills_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    if update.message.text.lower() != "пропустить":
-        user_json["actor"]["school"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
+    u = load_user(str(update.message.from_user.id))
+    u["actor"]["type"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
 
-    await update.message.reply_text("Опишите один ключевой типаж:")
+    await update.message.reply_text("Релевантные навыки (через запятую):")
     return STATE
 
 async def state_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["actor"]["type"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
-
-    await update.message.reply_text("Укажите релевантные навыки (через запятую):")
-    return HIDDEN_Q
-
-async def hidden_question_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["actor"]["skills"] = [s.strip() for s in update.message.text.split(",")]
-    save_user_json(user_json["user_id"], user_json)
-
-    await update.message.reply_text("Какое состояние хотите передать в кадре?")
-    return LENGTH
-
-async def length_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["focus"]["state"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
+    u = load_user(str(update.message.from_user.id))
+    u["actor"]["skills"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
 
     await update.message.reply_text(
-        "Выберите длительность:",
-        reply_markup=ReplyKeyboardMarkup([["30s", "45s"]], one_time_keyboard=True),
+        "Длительность:",
+        reply_markup=ReplyKeyboardMarkup([["30s", "45s"]], resize_keyboard=True),
     )
     return TONE
 
 async def tone_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["length"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
+    u = load_user(str(update.message.from_user.id))
+    u["length"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
 
     await update.message.reply_text(
-        "Выберите тон:",
+        "Тон:",
         reply_markup=ReplyKeyboardMarkup(
             [["дружелюбный", "строгий", "лёгкая ирония"]],
-            one_time_keyboard=True,
+            resize_keyboard=True,
         ),
     )
     return CTA
 
 async def cta_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    user_json["tone"] = update.message.text
-    save_user_json(user_json["user_id"], user_json)
+    u = load_user(str(update.message.from_user.id))
+    u["tone"] = update.message.text
+    save_user(str(update.message.from_user.id), u)
 
-    await update.message.reply_text("Введите финальный CTA (или «пропустить»):")
+    project = u["project"]["type"]
+    pool = CTA_POOLS.get(project, CTA_POOLS["современная драма"])
+
+    await update.message.reply_text(
+        "Выберите финальный CTA:",
+        reply_markup=ReplyKeyboardMarkup(
+            [[c] for c in pool] + [["Свой вариант"]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
     return GENERATE
 
 async def generate_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_json = load_user_json(str(update.message.from_user.id))
-    if update.message.text.lower() != "пропустить":
-        user_json["cta"] = update.message.text
+    u = load_user(str(update.message.from_user.id))
+    text = update.message.text.strip()
 
-    system_prompt = f"""
+    if text == "Свой вариант":
+        await update.message.reply_text("Введите ваш CTA:")
+        return GENERATE
+
+    u["cta"] = text
+    save_user(str(update.message.from_user.id), u)
+
+    prompt = f"""
 Ты — эксперт по актёрским видеовизиткам 2026 года.
-Создай 2 версии текста визитки под проект "{user_json['project']['type']}".
+Создай 2 версии видеовизитки под проект "{u['project']['type']}".
+
+Имя: {u['actor'].get('name')}
+Типаж: {u['actor'].get('type')}
+Действие: {u['project'].get('action')}
+Настроение: {u['project'].get('mood')}
+Длина: {u['length']}
+Тон: {u['tone']}
+Финальный CTA: {u['cta']}
 
 Правила:
-- Не резюме. Не биография.
-- Один типаж. Одно впечатление.
-- Минимум слов, максимум присутствия.
-- Длина: {user_json['length']}
-- Тон: {user_json['tone']}
+- Не резюме
+- Одно впечатление
+- Минимум слов
 """
 
-    messages = [{"role": "system", "content": system_prompt}]
-    drafts = gpt_chat(messages)
-
-    user_json["drafts"] = drafts.split("\n\n")
-    user_json["final"] = drafts
-    save_user_json(user_json["user_id"], user_json)
+    result = amvera_chat([{"role": "system", "content": prompt}])
 
     await update.message.reply_text(
-        f"Готово.\n\n{drafts}"
+        f"Готово.\n\n{result}"
     )
+
     return ConversationHandler.END
 
-# ---------------- ДОП. HANDLERS ----------------
-
-async def ignore_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Голосовые сообщения пока не поддерживаются.")
-
-async def fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Введите /start чтобы начать заново.")
-    return TYPE_PROJECT
-
-# ---------------- ЗАПУСК ----------------
+# ---------- ЗАПУСК ----------
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    conv_handler = ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            TYPE_PROJECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, type_project)],
-            MOOD: [MessageHandler(filters.TEXT & ~filters.COMMAND, mood_step)],
-            ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, action_step)],
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, name_step)],
-            TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, type_step)],
-            SKILLS: [MessageHandler(filters.TEXT & ~filters.COMMAND, skills_step)],
-            STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, state_step)],
-            HIDDEN_Q: [MessageHandler(filters.TEXT & ~filters.COMMAND, hidden_question_step)],
-            LENGTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, length_step)],
-            TONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tone_step)],
-            CTA: [MessageHandler(filters.TEXT & ~filters.COMMAND, cta_step)],
-            GENERATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, generate_step)],
+            TYPE_PROJECT: [MessageHandler(filters.TEXT, type_project)],
+            MOOD: [MessageHandler(filters.TEXT, mood_step)],
+            ACTION: [MessageHandler(filters.TEXT, action_step)],
+            NAME: [MessageHandler(filters.TEXT, name_step)],
+            SCHOOL: [MessageHandler(filters.TEXT, school_step)],
+            TYPE: [MessageHandler(filters.TEXT, type_step)],
+            SKILLS: [MessageHandler(filters.TEXT, skills_step)],
+            STATE: [MessageHandler(filters.TEXT, state_step)],
+            LENGTH: [MessageHandler(filters.TEXT, state_step)],
+            TONE: [MessageHandler(filters.TEXT, tone_step)],
+            CTA: [MessageHandler(filters.TEXT, cta_step)],
+            GENERATE: [MessageHandler(filters.TEXT, generate_step)],
         },
-        fallbacks=[MessageHandler(filters.ALL, fallback)],
+        fallbacks=[],
     )
 
-    app.add_handler(conv_handler)
-    app.add_handler(MessageHandler(filters.VOICE, ignore_voice))
-
+    app.add_handler(conv)
     app.run_polling()
 
 if __name__ == "__main__":
