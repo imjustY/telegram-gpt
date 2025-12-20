@@ -1,10 +1,11 @@
 import logging
-import tempfile
-#import ffmpeg
 import json
 import os
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext, ConversationHandler
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, filters,
+    CallbackContext, ConversationHandler
+)
 import openai
 import requests
 
@@ -58,6 +59,7 @@ def gpt_chat(messages):
 
 # --- Диалоговый флоу ---
 def start(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = TYPE_PROJECT
     update.message.reply_text(
         "Привет! Я помогу создать актёрскую видеовизитку под конкретный кастинг 2026 года.\n"
         "Выберите действие:",
@@ -66,6 +68,7 @@ def start(update: Update, context: CallbackContext):
     return TYPE_PROJECT
 
 def type_project(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = MOOD
     user_id = str(update.message.from_user.id)
     user_json = {
         "user_id": user_id,
@@ -99,6 +102,7 @@ def type_project(update: Update, context: CallbackContext):
     return MOOD
 
 def mood_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = ACTION
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['project']['type'] = update.message.text
     save_user_json(user_json['user_id'], user_json)
@@ -109,6 +113,7 @@ def mood_step(update: Update, context: CallbackContext):
     return ACTION
 
 def action_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = NAME
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['project']['mood'] = update.message.text
     save_user_json(user_json['user_id'], user_json)
@@ -121,6 +126,7 @@ def action_step(update: Update, context: CallbackContext):
     return NAME
 
 def name_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = TYPE
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['project']['action'] = update.message.text
     save_user_json(user_json['user_id'], user_json)
@@ -128,39 +134,51 @@ def name_step(update: Update, context: CallbackContext):
     return TYPE
 
 def type_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = SKILLS
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['actor']['name'] = update.message.text
+    save_user_json(user_json['user_id'], user_json)
     update.message.reply_text("Введите ваш вуз:")
     return SKILLS
 
 def skills_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = STATE
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['actor']['school'] = update.message.text
+    save_user_json(user_json['user_id'], user_json)
     update.message.reply_text("Опишите ключевой типаж (один образ):")
     return STATE
 
 def state_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = HIDDEN_Q
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['actor']['type'] = update.message.text
+    save_user_json(user_json['user_id'], user_json)
     update.message.reply_text("Укажите релевантные навыки (через запятую):")
     return HIDDEN_Q
 
 def hidden_question_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = LENGTH
     user_json = load_user_json(str(update.message.from_user.id))
     skills = [s.strip() for s in update.message.text.split(",")]
     user_json['actor']['skills'] = skills
+    save_user_json(user_json['user_id'], user_json)
     update.message.reply_text("Какое состояние хотите передать в кадре?")
     return LENGTH
 
 def length_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = TONE
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['focus']['state'] = update.message.text
+    save_user_json(user_json['user_id'], user_json)
     update.message.reply_text("На какой вопрос кастинг-директора вы хотите ответить?")
     return TONE
 
 def tone_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = CTA
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['focus']['hidden_question'] = update.message.text
+    save_user_json(user_json['user_id'], user_json)
     update.message.reply_text(
         "Выберите длительность визитки:",
         reply_markup=ReplyKeyboardMarkup([["30s","45s"]], one_time_keyboard=True)
@@ -168,8 +186,10 @@ def tone_step(update: Update, context: CallbackContext):
     return CTA
 
 def cta_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = GENERATE
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['length'] = update.message.text
+    save_user_json(user_json['user_id'], user_json)
     update.message.reply_text(
         "Выберите тон текста:",
         reply_markup=ReplyKeyboardMarkup([["дружелюбный","строгий","лёгкая ирония"]], one_time_keyboard=True)
@@ -177,8 +197,10 @@ def cta_step(update: Update, context: CallbackContext):
     return GENERATE
 
 def generate_step(update: Update, context: CallbackContext):
+    context.user_data['current_state'] = None
     user_json = load_user_json(str(update.message.from_user.id))
     user_json['tone'] = update.message.text
+    save_user_json(user_json['user_id'], user_json)
     update.message.reply_text("Введите финальный CTA (или пропустите):")
     return finalize_step
 
@@ -225,37 +247,9 @@ def finalize_step(update: Update, context: CallbackContext):
     )
     return ConversationHandler.END
 
-# --- Голосовые сообщения ---
+# --- Игнорирование голосовых сообщений ---
 async def ignore_voice(update: Update, context: CallbackContext):
     await update.message.reply_text("Голосовые сообщения временно не поддерживаются.")
-#async def voice_to_text(update: Update, context: CallbackContext):
-    #voice_file = await update.message.voice.get_file()
-    #with tempfile.NamedTemporaryFile(suffix=".ogg") as f:
-        #await voice_file.download_to_drive(f.name)
-        #wav_file = f.name.replace(".ogg", ".wav")
-        #ffmpeg.input(f.name).output(wav_file).run(overwrite_output=True)
-        #with open(wav_file, "rb") as audio:
-            #transcript = openai.Audio.transcriptions.create(
-                #model="whisper-1",
-                #file=audio
-            #)
-    #update.message.text = transcript['text']
-    #current_state = context.user_data.get('current_state', TYPE_PROJECT)
-    #state_map = {
-        #TYPE_PROJECT: type_project,
-        #MOOD: mood_step,
-        #ACTION: action_step,
-        #NAME: type_step,
-        #TYPE: type_step,
-        #SKILLS: skills_step,
-        #STATE: state_step,
-        #HIDDEN_Q: hidden_question_step,
-        #LENGTH: length_step,
-        #TONE: tone_step,
-        #CTA: cta_step,
-        #GENERATE: generate_step
-    #}
-    #return state_map.get(current_state, type_project)(update, context)
 
 # --- Просмотр визиток ---
 def mycards(update: Update, context: CallbackContext):
@@ -268,6 +262,11 @@ def mycards(update: Update, context: CallbackContext):
         text += f"{i}. {d[:100]}...\n"
     text += f"\nФинал:\n{user_json['final']}"
     update.message.reply_text(text)
+
+# --- Fallback для активного ConversationHandler ---
+def fallback(update: Update, context: CallbackContext):
+    update.message.reply_text("Пожалуйста, начните с команды /start")
+    return TYPE_PROJECT
 
 # --- Запуск ---
 def main():
@@ -285,11 +284,11 @@ def main():
             STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, state_step)],
             HIDDEN_Q: [MessageHandler(filters.TEXT & ~filters.COMMAND, hidden_question_step)],
             LENGTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, length_step)],
-            TONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tone_step)],
-            CTA: [MessageHandler(filters.TEXT & ~filters.COMMAND, cta_step)],
+            TONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cta_step)],
+            CTA: [MessageHandler(filters.TEXT & ~filters.COMMAND, generate_step)],
             GENERATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, finalize_step)],
         },
-        fallbacks=[]
+        fallbacks=[MessageHandler(filters.TEXT & ~filters.COMMAND, fallback)]
     )
 
     app.add_handler(conv_handler)
