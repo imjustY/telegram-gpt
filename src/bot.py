@@ -21,9 +21,9 @@ logging.basicConfig(
 )
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-AMVERA_TOKEN = os.getenv("OPENAI_API_KEY")  # да, именно так
-AMVERA_MODEL = "gpt-5"
+AMVERA_TOKEN = os.getenv("OPENAI_API_KEY")  # используется как Bearer
 AMVERA_URL = "https://api.amvera.com/v1/chat/completions"
+AMVERA_MODEL = "gpt-5"
 
 if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
     raise RuntimeError("Не заданы TELEGRAM_TOKEN или OPENAI_API_KEY")
@@ -46,10 +46,12 @@ if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
 
 def amvera_chat(messages: list[dict]) -> str:
     try:
+        logging.info("Amvera request started")
+
         response = requests.post(
             AMVERA_URL,
             headers={
-                "X-Auth-Token": f"Bearer {AMVERA_TOKEN}",
+                "Authorization": f"Bearer {AMVERA_TOKEN}",
                 "Content-Type": "application/json"
             },
             json={
@@ -57,12 +59,14 @@ def amvera_chat(messages: list[dict]) -> str:
                 "messages": messages,
                 "temperature": 0.7
             },
-            timeout=60
+            timeout=60,
+            verify=True
         )
+
         response.raise_for_status()
         data = response.json()
 
-        # Жёсткая проверка структуры
+        # жёсткая проверка структуры
         if (
             not isinstance(data, dict)
             or "choices" not in data
@@ -71,7 +75,7 @@ def amvera_chat(messages: list[dict]) -> str:
             or "content" not in data["choices"][0]["message"]
         ):
             logging.error(f"Некорректный ответ Amvera: {data}")
-            raise RuntimeError("Некорректная структура ответа LLM")
+            raise RuntimeError("Некорректная структура ответа Amvera")
 
         return data["choices"][0]["message"]["content"]
 
