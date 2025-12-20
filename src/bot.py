@@ -226,6 +226,8 @@ def finalize_step(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # --- Голосовые сообщения ---
+async def ignore_voice(update: Update, context: CallbackContext):
+    await update.message.reply_text("Голосовые сообщения временно не поддерживаются.")
 #async def voice_to_text(update: Update, context: CallbackContext):
     #voice_file = await update.message.voice.get_file()
     #with tempfile.NamedTemporaryFile(suffix=".ogg") as f:
@@ -291,7 +293,7 @@ def main():
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(MessageHandler(filters.VOICE, voice_to_text))
+    app.add_handler(MessageHandler(filters.VOICE, ignore_voice))
     app.add_handler(CommandHandler('mycards', mycards))
 
     app.run_polling()
