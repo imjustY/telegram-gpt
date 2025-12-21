@@ -52,33 +52,25 @@ def amvera_chat(messages: list[dict]) -> str:
         logging.info("Amvera request started")
 
         # 🔧 Адаптация messages под Amvera (content → text)
-        amvera_messages = []
-        for m in messages:
-            amvera_messages.append({
-                "role": m["role"],
-                "text": m.get("content", "")
-            })
+        amvera_messages = [{"role": m["role"], "text": m.get("content", "")} for m in messages]
 
         response = requests.post(
             AMVERA_URL,
             headers={
-                # ❗ КРИТИЧЕСКИ ВАЖНО
                 "X-Auth-Token": f"Bearer {AMVERA_TOKEN}",
                 "Content-Type": "application/json"
             },
             json={
                 "model": AMVERA_MODEL,
                 "messages": amvera_messages,
-                "temperature": 1
+                "temperature": 1  # или можно убрать
             },
             timeout=60,
             verify=False
         )
 
         if response.status_code != 200:
-            logging.error(
-                f"Amvera HTTP {response.status_code}: {response.text}"
-            )
+            logging.error(f"Amvera HTTP {response.status_code}: {response.text}")
             response.raise_for_status()
 
         data = response.json()
@@ -89,12 +81,12 @@ def amvera_chat(messages: list[dict]) -> str:
             or "choices" not in data
             or not data["choices"]
             or "message" not in data["choices"][0]
-            or "text" not in data["choices"][0]["message"]
+            or "content" not in data["choices"][0]["message"]
         ):
             logging.error(f"Некорректный ответ Amvera: {data}")
             raise RuntimeError("Некорректная структура ответа Amvera")
 
-        return data["choices"][0]["message"]["text"]
+        return data["choices"][0]["message"]["content"]
 
     except Exception as e:
         logging.exception("Ошибка Amvera API")
@@ -260,63 +252,4 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Текст:
 {draft}
 
-Если средний балл ниже 4:
-— перепиши текст,
-— сохрани поведение,
-— усили впечатление,
-— сократи объяснения.
-
-Верни строго в формате:
-ВЕРСИЯ 1:
-...
-ВЕРСИЯ 2:
-...
-ПОЯСНЕНИЕ:
-...
-"""
-
-    final = amvera_chat([{"role": "system", "content": critic_prompt}])
-
-    save_to_archive(
-        context,
-        {
-            "project": context.user_data["project"],
-            "task": context.user_data["task"],
-            "behavior": {
-                "action": context.user_data["action"],
-                "presence": context.user_data["presence"],
-                "formula": context.user_data["behavior"]
-            },
-            "result": final
-        }
-    )
-
-    await update.message.reply_text(final)
-    return ConversationHandler.END
-
-# ================= MAIN =================
-
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            PROJECT: [MessageHandler(filters.TEXT, project)],
-            TASK: [MessageHandler(filters.TEXT, task)],
-            NAME: [MessageHandler(filters.TEXT, name)],
-            EDUCATION: [MessageHandler(filters.TEXT, education)],
-            ACTION: [MessageHandler(filters.TEXT, action)],
-            PRESENCE: [MessageHandler(filters.TEXT, presence)],
-            BEHAVIOR: [MessageHandler(filters.TEXT, behavior)],
-            UNIVERSAL: [MessageHandler(filters.TEXT, universal)],
-            GENERATE: [MessageHandler(filters.TEXT, generate)],
-        },
-        fallbacks=[]
-    )
-
-    app.add_handler(conv)
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+Если средний балл ниже
