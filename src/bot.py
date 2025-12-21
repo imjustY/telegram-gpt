@@ -61,7 +61,7 @@ def amvera_chat(messages: list[dict]) -> str:
             json={
                 "model": AMVERA_MODEL,
                 "messages": amvera_messages,
-                "temperature": 0.7
+                "temperature": 1
             },
             timeout=60,
             verify=False
