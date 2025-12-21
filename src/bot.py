@@ -55,7 +55,7 @@ def amvera_chat(messages: list[dict]) -> str:
             "model": AMVERA_MODEL,
             "messages": amvera_messages,
             "temperature": 1,    # обязательно 1
-            "max_tokens": 3500   # увеличенный лимит
+            "max_completion_tokens": 3500   # увеличенный лимит
         }
 
         logging.info(f"Amvera payload size: {sum(len(m['content']) for m in amvera_messages)} chars")
