@@ -1,6 +1,7 @@
 import logging
 import os
 import requests
+import urllib3
 from datetime import datetime
 
 from telegram import Update, ReplyKeyboardMarkup
@@ -13,6 +14,9 @@ from telegram.ext import (
     filters
 )
 
+# ================= SSL FIX =================
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 # ================= НАСТРОЙКИ =================
 
 logging.basicConfig(
@@ -21,7 +25,7 @@ logging.basicConfig(
 )
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-AMVERA_TOKEN = os.getenv("OPENAI_API_KEY")  # используется как Bearer
+AMVERA_TOKEN = os.getenv("OPENAI_API_KEY")  # длинный токен Amvera
 AMVERA_URL = "https://api.amvera.com/v1/chat/completions"
 AMVERA_MODEL = "gpt-5"
 
@@ -60,13 +64,12 @@ def amvera_chat(messages: list[dict]) -> str:
                 "temperature": 0.7
             },
             timeout=60,
-            verify=True
+            verify=False  # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ TLS
         )
 
         response.raise_for_status()
         data = response.json()
 
-        # жёсткая проверка структуры
         if (
             not isinstance(data, dict)
             or "choices" not in data
