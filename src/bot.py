@@ -52,19 +52,28 @@ def amvera_chat(messages: list[dict]) -> str:
     try:
         logging.info("Amvera request started")
 
+        # ⚠️ Amvera использует text, а не content
+        amvera_messages = [
+            {
+                "role": msg["role"],
+                "text": msg["content"]
+            }
+            for msg in messages
+        ]
+
         response = requests.post(
             AMVERA_URL,
             headers={
-                "Authorization": f"Bearer {AMVERA_TOKEN}",
+                "X-Auth-Token": f"Bearer {AMVERA_TOKEN}",
                 "Content-Type": "application/json"
             },
             json={
                 "model": AMVERA_MODEL,
-                "messages": messages,
+                "messages": amvera_messages,
                 "temperature": 0.7
             },
             timeout=60,
-            verify=False  # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ TLS
+            verify=False
         )
 
         response.raise_for_status()
@@ -75,12 +84,12 @@ def amvera_chat(messages: list[dict]) -> str:
             or "choices" not in data
             or not data["choices"]
             or "message" not in data["choices"][0]
-            or "content" not in data["choices"][0]["message"]
+            or "text" not in data["choices"][0]["message"]
         ):
             logging.error(f"Некорректный ответ Amvera: {data}")
             raise RuntimeError("Некорректная структура ответа Amvera")
 
-        return data["choices"][0]["message"]["content"]
+        return data["choices"][0]["message"]["text"]
 
     except Exception as e:
         logging.exception("Ошибка Amvera API")
