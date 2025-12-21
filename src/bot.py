@@ -252,4 +252,64 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Текст:
 {draft}
 
-Если средний балл ниже
+Если средний балл ниже 4:
+— перепиши текст,
+— сохрани поведение,
+— усили впечатление,
+— сократи объяснения.
+
+Верни строго в формате:
+ВЕРСИЯ 1:
+...
+ВЕРСИЯ 2:
+...
+ПОЯСНЕНИЕ:
+...
+"""
+
+    final = amvera_chat([{"role": "system", "content": critic_prompt}])
+
+    save_to_archive(
+        context,
+        {
+            "project": context.user_data["project"],
+            "task": context.user_data["task"],
+            "behavior": {
+                "action": context.user_data["action"],
+                "presence": context.user_data["presence"],
+                "formula": context.user_data["behavior"]
+            },
+            "result": final
+        }
+    )
+
+    # ================= Отправляем текст в Telegram =================
+    await update.message.reply_text(final)
+    return ConversationHandler.END
+
+# ================= MAIN =================
+
+def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            PROJECT: [MessageHandler(filters.TEXT, project)],
+            TASK: [MessageHandler(filters.TEXT, task)],
+            NAME: [MessageHandler(filters.TEXT, name)],
+            EDUCATION: [MessageHandler(filters.TEXT, education)],
+            ACTION: [MessageHandler(filters.TEXT, action)],
+            PRESENCE: [MessageHandler(filters.TEXT, presence)],
+            BEHAVIOR: [MessageHandler(filters.TEXT, behavior)],
+            UNIVERSAL: [MessageHandler(filters.TEXT, universal)],
+            GENERATE: [MessageHandler(filters.TEXT, generate)],
+        },
+        fallbacks=[]
+    )
+
+    app.add_handler(conv)
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
