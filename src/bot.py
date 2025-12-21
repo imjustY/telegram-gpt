@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-AMVERA_TOKEN = os.getenv("OPENAI_API_KEY")
+AMVERA_TOKEN = os.getenv("OPENAI_API_KEY")  # длинный токен Amvera
 AMVERA_URL = "https://kong-proxy.yc.amvera.ru/api/v1/models/gpt"
 AMVERA_MODEL = "gpt-5"
 
@@ -49,22 +49,24 @@ if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
 
 def amvera_chat(messages: list[dict]) -> str:
     try:
-        # Правильная структура под Amvera API
         amvera_messages = [{"role": m["role"], "content": m.get("content", "")} for m in messages]
 
+        payload = {
+            "model": AMVERA_MODEL,
+            "messages": amvera_messages,
+            "temperature": 1,    # обязательно 1
+            "max_tokens": 3500   # увеличенный лимит
+        }
+
+        logging.info(f"Amvera payload size: {sum(len(m['content']) for m in amvera_messages)} chars")
         response = requests.post(
             AMVERA_URL,
             headers={
                 "X-Auth-Token": f"Bearer {AMVERA_TOKEN}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": AMVERA_MODEL,
-                "messages": amvera_messages,
-                "temperature": 1,
-                "max_tokens": 3500
-            },
-            timeout=(10, 180),
+            json=payload,
+            timeout=(10, 300),   # таймаут увеличен для больших генераций
             verify=False
         )
 
@@ -72,13 +74,17 @@ def amvera_chat(messages: list[dict]) -> str:
         data = response.json()
 
         if "choices" not in data or not data["choices"]:
-            raise RuntimeError("Некорректный ответ Amvera")
+            raise RuntimeError(f"Некорректный ответ Amvera: {data}")
 
         return data["choices"][0]["message"]["content"]
 
+    except requests.exceptions.HTTPError as e:
+        logging.error(f"HTTPError: {e.response.status_code} {e.response.text}")
+        raise RuntimeError(f"Ошибка генерации: {e}")
     except Exception as e:
         logging.exception("Ошибка Amvera API")
         raise RuntimeError(f"Ошибка генерации: {e}")
+
 # ================= АРХИВ =================
 
 def save_to_archive(context, payload):
@@ -180,6 +186,7 @@ async def format_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["format"] = update.message.text
+
     await update.message.reply_text("Собираю текст и режу лишнее…")
 
     system_prompt = f"""
