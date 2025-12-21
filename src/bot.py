@@ -49,10 +49,8 @@ if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
 
 def amvera_chat(messages: list[dict]) -> str:
     try:
-        amvera_messages = [
-            {"role": m["role"], "text": m.get("content", "")}
-            for m in messages
-        ]
+        # Правильная структура под Amvera API
+        amvera_messages = [{"role": m["role"], "content": m.get("content", "")} for m in messages]
 
         response = requests.post(
             AMVERA_URL,
@@ -66,32 +64,21 @@ def amvera_chat(messages: list[dict]) -> str:
                 "temperature": 1,
                 "max_tokens": 3500
             },
-            timeout=(10, 150),   # ⬅ КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+            timeout=(10, 180),
             verify=False
         )
 
         response.raise_for_status()
         data = response.json()
 
-        if (
-            not isinstance(data, dict)
-            or "choices" not in data
-            or not data["choices"]
-            or "message" not in data["choices"][0]
-            or "content" not in data["choices"][0]["message"]
-        ):
-            raise RuntimeError(f"Некорректный ответ Amvera: {data}")
+        if "choices" not in data or not data["choices"]:
+            raise RuntimeError("Некорректный ответ Amvera")
 
         return data["choices"][0]["message"]["content"]
-
-    except requests.exceptions.Timeout:
-        logging.error("Amvera timeout")
-        raise RuntimeError("Генерация заняла слишком много времени. Попробуйте ещё раз.")
 
     except Exception as e:
         logging.exception("Ошибка Amvera API")
         raise RuntimeError(f"Ошибка генерации: {e}")
-
 # ================= АРХИВ =================
 
 def save_to_archive(context, payload):
