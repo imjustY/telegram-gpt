@@ -47,23 +47,22 @@ if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
 ) = range(9)
 
 # ================= AMVERA =================
-
 def amvera_chat(messages: list[dict]) -> str:
     try:
         logging.info("Amvera request started")
 
-        # ⚠️ Amvera использует text, а не content
-        amvera_messages = [
-            {
-                "role": msg["role"],
-                "text": msg["content"]
-            }
-            for msg in messages
-        ]
+        # 🔧 Адаптация messages под Amvera (content → text)
+        amvera_messages = []
+        for m in messages:
+            amvera_messages.append({
+                "role": m["role"],
+                "text": m.get("content", "")
+            })
 
         response = requests.post(
             AMVERA_URL,
             headers={
+                # ❗ КРИТИЧЕСКИ ВАЖНО
                 "X-Auth-Token": f"Bearer {AMVERA_TOKEN}",
                 "Content-Type": "application/json"
             },
@@ -76,9 +75,15 @@ def amvera_chat(messages: list[dict]) -> str:
             verify=False
         )
 
-        response.raise_for_status()
+        if response.status_code != 200:
+            logging.error(
+                f"Amvera HTTP {response.status_code}: {response.text}"
+            )
+            response.raise_for_status()
+
         data = response.json()
 
+        # 🔍 Проверка структуры ответа
         if (
             not isinstance(data, dict)
             or "choices" not in data
