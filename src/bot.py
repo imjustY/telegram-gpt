@@ -26,7 +26,7 @@ logging.basicConfig(
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 AMVERA_TOKEN = os.getenv("OPENAI_API_KEY")  # длинный токен Amvera
-AMVERA_URL = "https://api.amvera.com/v1/chat/completions"
+AMVERA_URL = "https://kong-proxy.yc.amvera.ru/api/v1/chat/completions"
 AMVERA_MODEL = "gpt-5"
 
 if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
