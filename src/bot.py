@@ -36,22 +36,19 @@ if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
 
 (
     PROJECT,
-    TASK,
     NAME,
     EDUCATION,
     ACTION,
     PRESENCE,
     BEHAVIOR,
-    UNIVERSAL,
+    FORMAT,
     GENERATE
-) = range(9)
+) = range(8)
 
 # ================= AMVERA =================
 
 def amvera_chat(messages: list[dict]) -> str:
     try:
-        logging.info("Amvera request started")
-
         amvera_messages = [
             {"role": m["role"], "text": m.get("content", "")}
             for m in messages
@@ -67,20 +64,29 @@ def amvera_chat(messages: list[dict]) -> str:
                 "model": AMVERA_MODEL,
                 "messages": amvera_messages,
                 "temperature": 1,
-                "max_tokens": 800
+                "max_tokens": 3500
             },
-            timeout=(10, 120),
+            timeout=(10, 150),   # ⬅ КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
             verify=False
         )
 
         response.raise_for_status()
         data = response.json()
 
+        if (
+            not isinstance(data, dict)
+            or "choices" not in data
+            or not data["choices"]
+            or "message" not in data["choices"][0]
+            or "content" not in data["choices"][0]["message"]
+        ):
+            raise RuntimeError(f"Некорректный ответ Amvera: {data}")
+
         return data["choices"][0]["message"]["content"]
 
     except requests.exceptions.Timeout:
         logging.error("Amvera timeout")
-        raise RuntimeError("Сервер генерации не успел ответить. Попробуйте ещё раз.")
+        raise RuntimeError("Генерация заняла слишком много времени. Попробуйте ещё раз.")
 
     except Exception as e:
         logging.exception("Ошибка Amvera API")
@@ -98,74 +104,49 @@ def save_to_archive(context, payload):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    context.user_data["archive"] = []
-
     await update.message.reply_text(
-        "Этот бот помогает собрать текст видеовизитки для кастинга.\n"
-        "Не резюме. Не рассказ о себе.\n"
-        "А впечатление человека, которого хочется смотреть дальше.\n\n"
-        "Займёт 5–7 минут.",
+        "Этот бот собирает ТЕКСТ ВИДЕОВИЗИТКИ ДЛЯ КАСТИНГА.\n\n"
+        "Не резюме.\n"
+        "Не самопробы.\n"
+        "А рабочее присутствие в кадре.\n\n"
+        "Отвечай просто.",
         reply_markup=ReplyKeyboardMarkup([["Начать"]], resize_keyboard=True)
     )
     return PROJECT
 
-# ================= БЛОК 1 =================
+# ================= ВОПРОСЫ =================
 
 async def project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Для какого проекта вы делаете визитку?",
+        "Где ты хочешь, чтобы эта визитка работала?",
         reply_markup=ReplyKeyboardMarkup(
-            [
-                ["Современная драма", "Комедия"],
-                ["Реклама", "Подростковый проект"],
-                ["Исторический", "Триллер / мистика"]
-            ],
-            resize_keyboard=True
-        )
-    )
-    return TASK
-
-async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["project"] = update.message.text
-    await update.message.reply_text(
-        "Какую задачу должна решать эта визитка?",
-        reply_markup=ReplyKeyboardMarkup(
-            [
-                ["Познакомить кастинг со мной"],
-                ["Закрепить конкретный типаж"],
-                ["Обновить материалы"],
-                ["Подготовить под самопробы"]
-            ],
+            [["Кино / сериалы"], ["Реклама"], ["Самопробы"]],
             resize_keyboard=True
         )
     )
     return NAME
 
-# ================= БЛОК 2 =================
-
 async def name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["task"] = update.message.text
-    await update.message.reply_text("Как вас зовут?")
+    context.user_data["project"] = update.message.text
+    await update.message.reply_text("Как тебя зовут?")
     return EDUCATION
 
 async def education(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["name"] = update.message.text
     await update.message.reply_text(
-        "Образование (если есть):",
+        "Образование (вуз и мастер).\nЕсли нет — нажми «Пропустить».",
         reply_markup=ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
     )
     return ACTION
 
-# ================= БЛОК 3 =================
-
 async def action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text != "Пропустить":
-        context.user_data["education"] = update.message.text
-
+    context.user_data["education"] = (
+        update.message.text if update.message.text != "Пропустить" else "не указано"
+    )
     await update.message.reply_text(
-        "В этой визитке вы в кадре в первую очередь:",
+        "Что ты в первую очередь делаешь в кадре?",
         reply_markup=ReplyKeyboardMarkup(
-            [["Очаровываю"], ["Удерживаю внимание"], ["Вовлекаю"]],
+            [["Удерживаю форму"], ["Создаю давление"], ["Не мешаю сцене"]],
             resize_keyboard=True
         )
     )
@@ -174,9 +155,9 @@ async def action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def presence(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["action"] = update.message.text
     await update.message.reply_text(
-        "Как вы присутствуете в кадре?",
+        "Как ты присутствуешь?",
         reply_markup=ReplyKeyboardMarkup(
-            [["Спокойный центр"], ["Живой собеседник"], ["Загадка"]],
+            [["Спокойно"], ["С паузами"], ["Через взгляд"]],
             resize_keyboard=True
         )
     )
@@ -185,28 +166,24 @@ async def presence(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def behavior(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["presence"] = update.message.text
     await update.message.reply_text(
-        "В кадре вы ведёте себя как человек, который:",
+        "Что про тебя часто говорят в кадре?",
         reply_markup=ReplyKeyboardMarkup(
-            [
-                ["Не торопится и даёт себя рассмотреть"],
-                ["Спокойно удерживает контакт"],
-                ["Мягко притягивает внимание"],
-                ["Смотрит прямо и не объясняется"],
-                ["Чуть недоговаривает"]
-            ],
+            [["Не торопится"], ["Не объясняет"], ["Чуть неудобный"]],
             resize_keyboard=True
         )
     )
-    return UNIVERSAL
+    return FORMAT
 
-# ================= УНИВЕРСАЛ =================
-
-async def universal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def format_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["behavior"] = update.message.text
     await update.message.reply_text(
-        "Визитка строго под этот проект или более универсальная?",
+        "Выбери формат визитки:",
         reply_markup=ReplyKeyboardMarkup(
-            [["Строго под проект"], ["Более универсальная"]],
+            [
+                ["A — широкий вход"],
+                ["B — узкий удар"],
+                ["C — стабилизация сцены"]
+            ],
             resize_keyboard=True
         )
     )
@@ -215,32 +192,73 @@ async def universal(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= ГЕНЕРАЦИЯ =================
 
 async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["universal"] = update.message.text
-    await update.message.reply_text("Генерирую текст…")
+    context.user_data["format"] = update.message.text
+    await update.message.reply_text("Собираю текст и режу лишнее…")
 
     system_prompt = f"""
-Ты — профессиональный редактор актёрских видеовизиток.
+Ты — профессиональный редактор видеовизиток для кастинга.
 
-Проект: {context.user_data['project']}
+ФОРМАТ:
+A — широкий вход, управляемость
+B — давление, риск, неизбежность
+C — присутствие без запроса, стабилизация сцены
+
+ВЫБРАННЫЙ ФОРМАТ: {context.user_data['format']}
+
+ПРАВИЛА:
+— Только произносимый текст
+— До 14 слов в строке
+— Минимум 2 паузы
+— Один поведенческий приём
+— Никакой самопрезентации
+— Формат C не убеждает и не давит
+
+ДАННЫЕ АКТЁРА:
 Имя: {context.user_data['name']}
-Образование: {context.user_data.get('education', 'не указано')}
+Образование: {context.user_data['education']}
 Действие: {context.user_data['action']}
-Тип присутствия: {context.user_data['presence']}
-Поведение: {context.user_data['behavior']}
+Присутствие: {context.user_data['presence']}
+Неровность: {context.user_data['behavior']}
 
-Сделай ДВЕ версии текста видеовизитки.
-Коротко. Недосказанно. Без объяснений.
+ВЫВОД:
+
+ТЕКСТ ДЛЯ КАДРА:
+(5–7 строк)
+
+ДЛЯ КАСТИНГА:
+Функция в сцене:
+Режимы сцены:
+Цена отсутствия:
 """
 
-    result = amvera_chat([{"role": "system", "content": system_prompt}])
+    draft = amvera_chat([{"role": "system", "content": system_prompt}])
+
+    critic_prompt = f"""
+Проверь текст.
+
+ЕСЛИ ХОТЬ ОДИН ПУНКТ НЕТ — ПЕРЕПИШИ:
+
+— Можно говорить спокойно?
+— Можно молчать и не развалиться?
+— Понятно, зачем этот человек в сцене?
+— Без него сцена беднее?
+
+Текст:
+{draft}
+
+Верни ТОЛЬКО финальную версию
+в том же формате.
+"""
+
+    final = amvera_chat([{"role": "system", "content": critic_prompt}])
 
     save_to_archive(context, {
-        "project": context.user_data["project"],
-        "task": context.user_data["task"],
-        "result": result
+        "actor": context.user_data["name"],
+        "format": context.user_data["format"],
+        "result": final
     })
 
-    await update.message.reply_text(result)
+    await update.message.reply_text(final)
     return ConversationHandler.END
 
 # ================= MAIN =================
@@ -252,13 +270,12 @@ def main():
         entry_points=[CommandHandler("start", start)],
         states={
             PROJECT: [MessageHandler(filters.TEXT, project)],
-            TASK: [MessageHandler(filters.TEXT, task)],
             NAME: [MessageHandler(filters.TEXT, name)],
             EDUCATION: [MessageHandler(filters.TEXT, education)],
             ACTION: [MessageHandler(filters.TEXT, action)],
             PRESENCE: [MessageHandler(filters.TEXT, presence)],
             BEHAVIOR: [MessageHandler(filters.TEXT, behavior)],
-            UNIVERSAL: [MessageHandler(filters.TEXT, universal)],
+            FORMAT: [MessageHandler(filters.TEXT, format_select)],
             GENERATE: [MessageHandler(filters.TEXT, generate)],
         },
         fallbacks=[]
