@@ -42,7 +42,7 @@ if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
     ACTION,
     PRESENCE,
     BEHAVIOR,
-    FORMAT,
+    UNIVERSAL,
     GENERATE
 ) = range(9)
 
@@ -50,7 +50,12 @@ if not TELEGRAM_TOKEN or not AMVERA_TOKEN:
 
 def amvera_chat(messages: list[dict]) -> str:
     try:
-        amvera_messages = [{"role": m["role"], "text": m.get("content", "")} for m in messages]
+        logging.info("Amvera request started")
+
+        amvera_messages = [
+            {"role": m["role"], "text": m.get("content", "")}
+            for m in messages
+        ]
 
         response = requests.post(
             AMVERA_URL,
@@ -61,19 +66,21 @@ def amvera_chat(messages: list[dict]) -> str:
             json={
                 "model": AMVERA_MODEL,
                 "messages": amvera_messages,
-                "temperature": 1
+                "temperature": 0.6,
+                "max_tokens": 800
             },
-            timeout=60,
+            timeout=(10, 120),
             verify=False
         )
 
         response.raise_for_status()
         data = response.json()
 
-        if "choices" not in data:
-            raise RuntimeError("Некорректный ответ Amvera")
-
         return data["choices"][0]["message"]["content"]
+
+    except requests.exceptions.Timeout:
+        logging.error("Amvera timeout")
+        raise RuntimeError("Сервер генерации не успел ответить. Попробуйте ещё раз.")
 
     except Exception as e:
         logging.exception("Ошибка Amvera API")
@@ -91,23 +98,28 @@ def save_to_archive(context, payload):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
+    context.user_data["archive"] = []
+
     await update.message.reply_text(
-        "Этот бот собирает ТЕКСТ ВИДЕОВИЗИТКИ ДЛЯ КАСТИНГА.\n\n"
-        "Не резюме.\n"
-        "Не рассказ о себе.\n"
-        "А рабочий инструмент для кастинга.\n\n"
-        "Отвечай просто. Как ребёнку.",
+        "Этот бот помогает собрать текст видеовизитки для кастинга.\n"
+        "Не резюме. Не рассказ о себе.\n"
+        "А впечатление человека, которого хочется смотреть дальше.\n\n"
+        "Займёт 5–7 минут.",
         reply_markup=ReplyKeyboardMarkup([["Начать"]], resize_keyboard=True)
     )
     return PROJECT
 
-# ================= ВОПРОСЫ =================
+# ================= БЛОК 1 =================
 
 async def project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Где ты хочешь, чтобы эта визитка работала?",
+        "Для какого проекта вы делаете визитку?",
         reply_markup=ReplyKeyboardMarkup(
-            [["Кино / сериалы"], ["Реклама"], ["Самопробы"]],
+            [
+                ["Современная драма", "Комедия"],
+                ["Реклама", "Подростковый проект"],
+                ["Исторический", "Триллер / мистика"]
+            ],
             resize_keyboard=True
         )
     )
@@ -115,64 +127,86 @@ async def project(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["project"] = update.message.text
-    await update.message.reply_text("Как тебя зовут?")
-    return NAME
-
-async def name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["name"] = update.message.text
     await update.message.reply_text(
-        "Образование (вуз и мастер).\nЕсли нет — нажми «Пропустить».",
-        reply_markup=ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
-    )
-    return EDUCATION
-
-async def education(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text != "Пропустить":
-        context.user_data["education"] = update.message.text
-    else:
-        context.user_data["education"] = "не указано"
-
-    await update.message.reply_text(
-        "Что ты в первую очередь делаешь в кадре?",
+        "Какую задачу должна решать эта визитка?",
         reply_markup=ReplyKeyboardMarkup(
-            [["Удерживаю форму"], ["Создаю давление"], ["Не мешаю сцене"]],
+            [
+                ["Познакомить кастинг со мной"],
+                ["Закрепить конкретный типаж"],
+                ["Обновить материалы"],
+                ["Подготовить под самопробы"]
+            ],
             resize_keyboard=True
         )
     )
+    return NAME
+
+# ================= БЛОК 2 =================
+
+async def name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["task"] = update.message.text
+    await update.message.reply_text("Как вас зовут?")
+    return EDUCATION
+
+async def education(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["name"] = update.message.text
+    await update.message.reply_text(
+        "Образование (если есть):",
+        reply_markup=ReplyKeyboardMarkup([["Пропустить"]], resize_keyboard=True)
+    )
     return ACTION
 
+# ================= БЛОК 3 =================
+
 async def action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["action"] = update.message.text
+    if update.message.text != "Пропустить":
+        context.user_data["education"] = update.message.text
+
     await update.message.reply_text(
-        "Как ты присутствуешь?",
+        "В этой визитке вы в кадре в первую очередь:",
         reply_markup=ReplyKeyboardMarkup(
-            [["Спокойно"], ["С паузами"], ["Через взгляд"]],
+            [["Очаровываю"], ["Удерживаю внимание"], ["Вовлекаю"]],
             resize_keyboard=True
         )
     )
     return PRESENCE
 
 async def presence(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["presence"] = update.message.text
+    context.user_data["action"] = update.message.text
     await update.message.reply_text(
-        "Что про тебя часто говорят в кадре?",
+        "Как вы присутствуете в кадре?",
         reply_markup=ReplyKeyboardMarkup(
-            [["Не торопится"], ["Не объясняет"], ["Чуть неудобный"]],
+            [["Спокойный центр"], ["Живой собеседник"], ["Загадка"]],
             resize_keyboard=True
         )
     )
     return BEHAVIOR
 
 async def behavior(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["behavior"] = update.message.text
+    context.user_data["presence"] = update.message.text
     await update.message.reply_text(
-        "Выбери формат визитки:",
+        "В кадре вы ведёте себя как человек, который:",
         reply_markup=ReplyKeyboardMarkup(
             [
-                ["A — универсальный вход"],
-                ["B — давление / риск"],
-                ["C — стабилизация сцены"]
+                ["Не торопится и даёт себя рассмотреть"],
+                ["Спокойно удерживает контакт"],
+                ["Мягко притягивает внимание"],
+                ["Смотрит прямо и не объясняется"],
+                ["Чуть недоговаривает"]
             ],
+            resize_keyboard=True
+        )
+    )
+    return UNIVERSAL
+
+# ================= УНИВЕРСАЛ =================
+
+async def universal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["behavior"] = update.message.text
+    await update.message.reply_text(
+        "Визитка строго под этот проект или более универсальная?",
+        reply_markup=ReplyKeyboardMarkup(
+            [["Строго под проект"], ["Более универсальная"]],
             resize_keyboard=True
         )
     )
@@ -181,71 +215,32 @@ async def behavior(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= ГЕНЕРАЦИЯ =================
 
 async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["format"] = update.message.text
-
-    await update.message.reply_text("Собираю текст и режу лишнее…")
+    context.user_data["universal"] = update.message.text
+    await update.message.reply_text("Генерирую текст…")
 
     system_prompt = f"""
-Ты — профессиональный редактор видеовизиток для кастинга.
+Ты — профессиональный редактор актёрских видеовизиток.
 
-ФОРМАТ: {context.user_data['format']}
-
-ПРАВИЛА (ОБЯЗАТЕЛЬНЫ):
-— Пиши ТОЛЬКО произносимый текст.
-— Фразы до 14 слов.
-— Минимум 2 паузы.
-— Никаких жанров, эмоций, самопрезентации.
-— Один поведенческий приём.
-— Текст делится на ДВА СЛОЯ.
-
-ДАННЫЕ АКТЁРА:
+Проект: {context.user_data['project']}
 Имя: {context.user_data['name']}
-Образование: {context.user_data['education']}
-Основное действие: {context.user_data['action']}
-Присутствие: {context.user_data['presence']}
+Образование: {context.user_data.get('education', 'не указано')}
+Действие: {context.user_data['action']}
+Тип присутствия: {context.user_data['presence']}
 Поведение: {context.user_data['behavior']}
 
-ВЫВОД СТРОГО В ФОРМАТЕ:
-
-ТЕКСТ ДЛЯ КАДРА:
-(5–7 строк, можно молчать)
-
-ДЛЯ КАСТИНГА:
-Функция в сцене:
-Режимы сцены:
-Цена отсутствия:
-Образование:
+Сделай ДВЕ версии текста видеовизитки.
+Коротко. Недосказанно. Без объяснений.
 """
 
-    draft = amvera_chat([{"role": "system", "content": system_prompt}])
-
-    critic_prompt = f"""
-Проверь текст.
-
-ЕСЛИ ХОТЬ ОДИН ПУНКТ НЕТ — ПЕРЕПИШИ:
-
-— Текст можно сказать спокойно?
-— Можно замолчать и не выглядеть глупо?
-— Понятно, зачем этот актёр в сцене?
-— Без него сцена станет хуже?
-— Нет объяснений и «умности»?
-
-Текст:
-{draft}
-
-Верни ТОЛЬКО исправленную версию
-в том же формате.
-"""
-
-    final = amvera_chat([{"role": "system", "content": critic_prompt}])
+    result = amvera_chat([{"role": "system", "content": system_prompt}])
 
     save_to_archive(context, {
-        "actor": context.user_data["name"],
-        "format": context.user_data["format"],
-        "result": final
+        "project": context.user_data["project"],
+        "task": context.user_data["task"],
+        "result": result
     })
 
-    await update.message.reply_text(final)
+    await update.message.reply_text(result)
     return ConversationHandler.END
 
 # ================= MAIN =================
@@ -263,6 +258,7 @@ def main():
             ACTION: [MessageHandler(filters.TEXT, action)],
             PRESENCE: [MessageHandler(filters.TEXT, presence)],
             BEHAVIOR: [MessageHandler(filters.TEXT, behavior)],
+            UNIVERSAL: [MessageHandler(filters.TEXT, universal)],
             GENERATE: [MessageHandler(filters.TEXT, generate)],
         },
         fallbacks=[]
